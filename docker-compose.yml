@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    ports:
+      - "9876:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/smart_doc.db
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - EMBEDDING_MODEL=BAAI/bge-m3
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - HF_ENDPOINT=https://hf-mirror.com
+    volumes:
+      - app_data:/app/data
+      - app_uploads:/app/uploads
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.8.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  app_data:
+  app_uploads:
+  qdrant_data:
