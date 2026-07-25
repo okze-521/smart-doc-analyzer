@@ -78,18 +78,14 @@ class QdrantStore:
 
     def search(self, query_vector: list[float], top_k: int = 10) -> list[dict]:
         """余弦相似度检索"""
-        results = self._client.query_points(
+        results = self._client.search(
             collection_name=self.collection_name,
-            query=query_vector,
+            query_vector=query_vector,
             limit=top_k,
         )
         return [
-            {
-                "id": hit.id,
-                "score": hit.score,
-                "payload": hit.payload,
-            }
-            for hit in results.points
+            {"id": hit.id, "score": hit.score, "payload": hit.payload}
+            for hit in results
         ]
 
     # ----------------------------------------------------------------

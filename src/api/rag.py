@@ -11,8 +11,11 @@ from sqlalchemy.orm import Session
 from src.database import get_db
 from src.core.ingest_service import IngestService
 from src.core.search_service import SearchService
+from src.core.reranker import Reranker
+from src.config import settings
 from src.repositories.document import DocumentRepository
 from src.schemas.api import SearchRequest, SearchResponse, DocumentResponse, DocumentListResponse
+from src.core.llm_client import LLMClient
 
 router = APIRouter(prefix="/api/v1", tags=["rag"])
 
@@ -24,7 +27,10 @@ def get_ingest_service() -> IngestService:
 
 
 def get_search_service() -> SearchService:
-    return SearchService()
+    reranker = None
+    if settings.RERANKER_MODEL:
+        reranker = Reranker(settings.RERANKER_MODEL)
+    return SearchService(reranker=reranker)
 
 
 @router.post("/documents/upload")
@@ -76,6 +82,36 @@ async def search_documents(
     """检索相关文档片段"""
     result = search.search(req.query, top_k=req.top_k)
     return SearchResponse(**result)
+
+
+# ── RAG 问答（检索 + LLM 生成） ──────────
+
+@router.post("/documents/qa")
+async def ask_question(
+    req: SearchRequest,
+    search: Annotated[SearchService, Depends(get_search_service)],
+):
+    """检索 + LLM 生成回答"""
+    # 1. 检索
+    result = search.search(req.query, top_k=req.top_k)
+    chunks = result["chunks"]
+
+    if not chunks:
+        return {"query": req.query, "answer": "没有找到相关文档，请先上传文档。", "snippets": []}
+
+    # 2. 拼接上下文 + LLM 生成
+    context = [c["text"] for c in chunks]
+    client = LLMClient()
+    answer = await client.generate_with_context(req.query, context)
+
+    return {
+        "query": req.query,
+        "answer": answer,
+        "snippets": [
+            {"text": c["text"][:200], "source": c["source_file"], "score": c["score"]}
+            for c in chunks
+        ],
+    }
 
 
 @router.get("/documents", response_model=DocumentListResponse)

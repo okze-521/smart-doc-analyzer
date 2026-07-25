@@ -7,15 +7,21 @@ services:
       - DATABASE_URL=sqlite:///./data/smart_doc.db
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - EMBEDDING_MODEL=BAAI/bge-m3
+      - EMBEDDING_MODEL=/app/models/bge-small
+      - EMBEDDING_DIM=512
+      - RERANKER_MODEL=/app/models/bge-reranker-v2-m3
+      - LLM_PROVIDER=ollama
+      - OLLAMA_HOST=http://192.168.3.200:11434
+      - OLLAMA_MODEL=qwen3.6:35b-a3b-q4_K_M
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - HF_ENDPOINT=https://hf-mirror.com
     volumes:
       - app_data:/app/data
       - app_uploads:/app/uploads
+      - ./models/models/AI-ModelScope--bge-small-zh-v1.5/snapshots/master:/app/models/bge-small:ro
+      - ./models/bge-reranker-v2-m3:/app/models/bge-reranker-v2-m3:ro
     depends_on:
-      qdrant:
-        condition: service_healthy
+      - qdrant
     restart: unless-stopped
 
   qdrant:
@@ -25,11 +31,6 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     restart: unless-stopped
 
 volumes:

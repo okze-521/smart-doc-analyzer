@@ -1,6 +1,8 @@
 """FastAPI 入口"""
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from pathlib import Path
 
 from src.config import settings
 from src.api.rag import router as rag_router
@@ -22,6 +24,12 @@ app.include_router(auth_router)
 async def health():
     """存活探针"""
     return {"status": "ok", "app": settings.APP_NAME}
+
+
+@app.get("/")
+async def index():
+    """聊天界面"""
+    return FileResponse(Path(__file__).parent.parent / "chat.html")
 
 
 if __name__ == "__main__":

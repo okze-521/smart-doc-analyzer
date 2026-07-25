@@ -13,16 +13,19 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir \
     fastapi uvicorn[standard] sqlalchemy pydantic-settings \
     python-multipart aiofiles pymupdf python-docx openpyxl \
-    sentence-transformers qdrant-client httpx python-jose \
-    passlib bcrypt pyjwt \
-    && pip install --no-cache-dir -e . 2>/dev/null || true
+    "sentence-transformers>=3.0" "qdrant-client>=1.9,<1.12" httpx python-jose \
+    passlib bcrypt pyjwt
 
-# 源码
+# 源码、前端页面、启动脚本
 COPY src/ ./src/
-
+COPY scripts/ ./scripts/
+COPY chat.html .
+RUN chmod +x /app/scripts/entrypoint.sh
+ 
 # 数据目录
 RUN mkdir -p /app/data /app/uploads /app/models
-
+ 
 EXPOSE 8000
-
+ 
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

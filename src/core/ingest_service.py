@@ -26,7 +26,8 @@ class IngestService:
 
     def ingest(self, file_path: Path) -> dict:
         """解析一个文档并写入向量库"""
-        # 1. 解析
+        # 0. 确保集合存在
+        self.qdrant.ensure_collection()
         doc = self.parser.parse(file_path)
 
         # 2. 切片

@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # ========== Embedding 模型（笔记本 CPU） ==========
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
     EMBEDDING_DIM: int = 1024
+
+    # Reranker 模型路径（可选，不设则跳过精排）
+    RERANKER_MODEL: str = ""
     HF_ENDPOINT: str = "https://hf-mirror.com"
 
     # ========== 文件上传 ==========
