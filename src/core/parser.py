@@ -55,15 +55,15 @@ class DocumentParser:
     # ----------------------------------------------------------------
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument:
-        from PyPDF2 import PdfReader
+        import fitz  # pymupdf
 
-        reader = PdfReader(str(file_path))
-        total_pages = len(reader.pages)
+        doc = fitz.open(str(file_path))
+        total_pages = len(doc)
         all_text: list[str] = []
         sections: list[ParsedSection] = []
 
-        for page_num, page in enumerate(reader.pages, start=1):
-            text = page.extract_text() or ""
+        for page_num, page in enumerate(doc, start=1):
+            text = page.get_text()
             if text.strip():
                 all_text.append(text)
                 sections.append(
@@ -75,11 +75,11 @@ class DocumentParser:
                 )
 
         # 元数据
-        meta = reader.metadata or {}
+        meta = doc.metadata or {}
         metadata = {
-            "author": str(meta.get("/Author", "")),
-            "title": str(meta.get("/Title", "")),
-            "creator": str(meta.get("/Creator", "")),
+            "author": str(meta.get("author", "")),
+            "title": str(meta.get("title", "")),
+            "creator": str(meta.get("creator", "")),
             "pages": total_pages,
         }
 

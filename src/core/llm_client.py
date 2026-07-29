@@ -3,6 +3,7 @@
 import json
 
 import httpx
+import httpcore
 
 
 class LLMClient:
@@ -30,28 +31,58 @@ class LLMClient:
         else:
             return await self._deepseek_generate(prompt)
 
+    # ── 连接错误类型（用于 fallback 判断） ──
+    _CONNECT_ERRORS = (
+        httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError,
+        httpcore.ConnectError, httpcore.ReadError, httpcore.WriteError,
+    )
+
     async def generate_with_context(
         self, query: str, context_chunks: list[str], history: list[dict[str, str]] | None = None
     ) -> str:
-        """带上下文的 RAG 生成，支持多轮对话历史"""
+        """带上下文的 RAG 生成，支持多轮对话历史 + 自动 fallback"""
         system_prompt = self.build_rag_prompt(query, context_chunks)
-        if self.provider == "ollama":
-            return await self._ollama_chat(system_prompt, query, history)
-        else:
-            return await self._deepseek_chat(system_prompt, query, history)
+        try:
+            return await self._primary_chat(system_prompt, query, history)
+        except self._CONNECT_ERRORS:
+            if self._can_fallback():
+                return await self._deepseek_chat(system_prompt, query, history)
+            raise
 
     async def generate_with_context_stream(
         self, query: str, context_chunks: list[str], history: list[dict[str, str]] | None = None
     ):
-        """流式 RAG 生成，逐步 yield token"""
+        """流式 RAG 生成，支持自动 fallback"""
         system_prompt = self.build_rag_prompt(query, context_chunks)
         messages = self._build_messages(system_prompt, query, history)
+        try:
+            gen = self._primary_chat_stream(messages)
+            async for token in gen:
+                yield token
+        except self._CONNECT_ERRORS:
+            if self._can_fallback():
+                async for token in self._deepseek_chat_stream(messages):
+                    yield token
+            else:
+                raise
+
+    # ── Provider 路由 ─────────────────────
+
+    def _can_fallback(self) -> bool:
+        """检查是否有备用的 DeepSeek API"""
+        return self.provider == "ollama" and bool(self.deepseek_api_key)
+
+    def _primary_chat(self, system: str, user: str, history: list[dict[str, str]] | None) -> str:
+        """路由到当前主 provider 的聊天"""
         if self.provider == "ollama":
-            async for token in self._ollama_chat_stream(messages):
-                yield token
-        else:
-            async for token in self._deepseek_chat_stream(messages):
-                yield token
+            return self._ollama_chat(system, user, history)
+        return self._deepseek_chat(system, user, history)
+
+    def _primary_chat_stream(self, messages: list[dict[str, str]]):
+        """路由到当前主 provider 的流式聊天"""
+        if self.provider == "ollama":
+            return self._ollama_chat_stream(messages)
+        return self._deepseek_chat_stream(messages)
 
     # ── Ollama 后端 ─────────────────────
 

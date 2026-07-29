@@ -67,10 +67,10 @@
     
     /* 文档管理 */
     h1 { margin-bottom: 1rem; font-size: 1.5rem; color: var(--text-primary); }
-    .upload-section, .doc-list-section { background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .dropzone { padding: 2rem 1rem; text-align: center; border: 2px dashed var(--border); border-radius: 12px; background: #fafbfc; transition: all 0.3s; cursor: pointer; font-size: 0.95rem; color: var(--text-secondary); }
+    .upload-section, .doc-list-section { background: white; padding: 1rem; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .dropzone { padding: 1rem; text-align: center; border: 2px dashed var(--border); border-radius: 12px; background: #fafbfc; transition: all 0.3s; cursor: pointer; font-size: 0.9rem; color: var(--text-secondary); }
     .dropzone:hover, .dropzone.dragover { border-color: var(--primary); background: #f1f5f9; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(37,99,235,0.08); }
-    .dropzone-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .dropzone-icon { font-size: 1.8rem; margin-bottom: 0.3rem; }
     
     /* 进度条 & 文件列表 */
     .progress-bar { height: 6px; background: #f1f5f9; border-radius: 99px; overflow: hidden; margin-top: 0.75rem; }
@@ -162,7 +162,7 @@
             <p>拖拽文件到此处，或 <span class="accent">点击选择</span></p>
             <p style="font-size:0.75rem;margin-top:0.25rem;color:#94a3b8;">支持 PDF / DOCX / XLSX</p>
           </div>
-          <input type="file" id="fileInput" multiple accept=".pdf,.docx,.xlsx" style="display:none">
+          <input type="file" id="fileInput" multiple accept=".pdf,.docx,.xlsx" style="display:none" onchange="uploadFiles(this.files);this.value=''">
 
           <div class="progress-bar" id="progressBar" style="display:none">
             <div class="fill" id="progressFill" style="width:0%"></div>
@@ -301,8 +301,8 @@ async function uploadFiles(fileList) {
         const file = files[i]; // 只上传真实存在的文件对象
         try {
       const formData = new FormData();
-            formData.append('files', file, file.name);
-      await fetch(API + '/upload/doc', { method: 'POST', body: formData });
+            formData.append('file', file, file.name);
+      await fetch(API + '/upload', { method: 'POST', body: formData });
 
             progressFill.style.width = `${Math.round(((i + 1) / files.length) * 100)}%`;
         } catch (err) { console.error('Upload failed:', file.name, err); }
@@ -355,21 +355,6 @@ async function ask() {
 
         // 多轮对话：本轮用户消息记入历史
         conversationHistory.push({ role: 'user', content: question });
-
-        // Loading占位符
-    const loadingId = 'msg-' + Date.now();
-
-    const chatArea = document.getElementById('chatArea');
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'msg bot';
-    loadingDiv.id = loadingId;
-    loadingDiv.innerHTML = `
-      <div class="msg-avatar">🤖</div>
-      <div class="loading-dots">
-        <span></span><span></span><span></span>
-      </div>`;
-    chatArea.appendChild(loadingDiv);
-    chatArea.scrollTop = chatArea.scrollHeight;
 
   try {
     // 创建空 bot 气泡（流式逐字填充）
