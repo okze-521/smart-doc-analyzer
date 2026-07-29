@@ -16,6 +16,7 @@ from src.config import settings
 from src.repositories.document import DocumentRepository
 from src.schemas.api import SearchRequest, SearchResponse, DocumentResponse, DocumentListResponse
 from src.core.llm_client import LLMClient
+from src.core.qdrant_store import QdrantStore
 
 router = APIRouter(prefix="/api/v1", tags=["rag"])
 
@@ -57,10 +58,11 @@ async def upload_document(
         repo = DocumentRepository(db)
         doc = repo.create(str(tmp_path), file.filename, ext[1:])
 
-        # 2. 入库到 Qdrant
-        result = ingest.ingest(tmp_path)
+        # 2. 入库到 Qdrant（传入 doc_id 关联）
+        result = ingest.ingest(tmp_path, doc_id=doc.id)
 
-        # 3. 更新状态
+        # 3. 更新状态 + 片段数
+        repo.update_metadata(doc.id, {}, chunk_count=result["chunk_count"])
         repo.update_status(doc.id, "completed")
 
         return {
@@ -140,3 +142,28 @@ def get_document(
     if not doc:
         raise HTTPException(404, "文档不存在")
     return DocumentResponse.model_validate(doc)
+
+
+@router.delete("/documents/{doc_id}")
+def delete_document(
+    doc_id: int,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """删除文档 — SQLite 记录 + Qdrant 向量数据"""
+    repo = DocumentRepository(db)
+    doc = repo.get_by_id(doc_id)
+    if not doc:
+        raise HTTPException(404, "文档不存在")
+
+    # 1. 删除 Qdrant 向量
+    qdrant = QdrantStore()
+    deleted_points = qdrant.delete_by_doc_id(doc_id)
+
+    # 2. 删除 SQLite 记录
+    repo.delete(doc_id)
+
+    return {
+        "document_id": doc_id,
+        "filename": doc.original_filename,
+        "message": f"已删除，清理了 {deleted_points} 个向量点",
+    }

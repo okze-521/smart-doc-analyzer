@@ -99,3 +99,27 @@ class QdrantStore:
             points_selector=point_ids,
             wait=True,
         )
+
+    def delete_by_doc_id(self, doc_id: int) -> int:
+        """按 doc_id 删除向量点，返回删除数量"""
+        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
+        before = self.get_collection_info()
+        before_count = before["points_count"] if before else 0
+
+        self._client.delete(
+            collection_name=self.collection_name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="doc_id",
+                        match=MatchValue(value=doc_id),
+                    )
+                ]
+            ),
+            wait=True,
+        )
+
+        after = self.get_collection_info()
+        after_count = after["points_count"] if after else 0
+        return before_count - after_count

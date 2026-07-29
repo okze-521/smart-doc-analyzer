@@ -24,8 +24,13 @@ class IngestService:
         self.embedder = embedder or TextEmbedder()
         self.qdrant = qdrant or QdrantStore()
 
-    def ingest(self, file_path: Path) -> dict:
-        """解析一个文档并写入向量库"""
+    def ingest(self, file_path: Path, doc_id: int | None = None) -> dict:
+        """解析一个文档并写入向量库
+
+        Args:
+            file_path: 文档临时路径
+            doc_id: 数据库文档 ID，用于关联（删除时按此字段清理 Qdrant）
+        """
         # 0. 确保集合存在
         self.qdrant.ensure_collection()
         doc = self.parser.parse(file_path)
@@ -38,15 +43,18 @@ class IngestService:
         for i, chunk_text in enumerate(chunks):
             vector = self.embedder.embed(chunk_text)
             point_id = self._make_point_id(file_path, i)
+            payload = {
+                "text": chunk_text,
+                "chunk_index": i,
+                "source_file": str(file_path),
+                "file_type": doc.file_type,
+            }
+            if doc_id is not None:
+                payload["doc_id"] = doc_id
             self.qdrant.upsert(
                 point_id=point_id,
                 vector=vector,
-                payload={
-                    "text": chunk_text,
-                    "chunk_index": i,
-                    "source_file": str(file_path),
-                    "file_type": doc.file_type,
-                },
+                payload=payload,
             )
             chunk_records.append({"index": i, "text": chunk_text[:100]})
 
