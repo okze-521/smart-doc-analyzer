@@ -142,6 +142,7 @@
         <div class="input-row">
           <input type="text" id="questionInput" placeholder="输入你的问题…" onkeydown="if(event.key==='Enter')ask()">
           <button class="btn btn-primary" id="askBtn" onclick="ask()">发送</button>
+          <button class="btn" onclick="clearChat()" style="background:#f1f5f9;color:#64748b;" title="清除所有聊天记录">🗑️</button>
         </div>
       </div>
     </div>
@@ -192,6 +193,10 @@ const API = API_BASE + '/documents';
 
 // ═══ localStorage 聊天历史（彻底修复）═══ //
 const CHAT_KEY = '__sda_chat_hist__';
+
+// ═══ 多轮对话上下文 ═══
+let conversationHistory = [];           // [{role, content}] 最近 N 轮
+const MAX_HISTORY_ROUNDS = 10;         // 最多保留 10 轮 = 20 条消息
 
 // DOM操作：只追加到页面，不碰storage
 function appendMsg(role, content, isHtml = false) {
@@ -313,16 +318,45 @@ async function uploadFiles(fileList) {
 }
 
 // ═══ 提问 ══ //
+
+// 清空聊天记录（二次确认）
+function clearChat() {
+  if (!confirm('确定要清除所有聊天记录吗？此操作不可撤销。')) return;
+  conversationHistory = [];
+  localStorage.removeItem(CHAT_KEY);
+  const chatArea = document.getElementById('chatArea');
+  chatArea.innerHTML = `
+    <div class="msg bot">
+      <div class="msg-avatar">🤖</div>
+      <div class="msg-bubble">
+        聊天记录已清除。<br>上传文档后即可开始提问，我会根据文档内容为你找到准确答案。
+      </div>
+    </div>`;
+}
+
 async function ask() {
         const questionInput = document.getElementById('questionInput');
         const question = questionInput.value.trim();
     if (!question) return;
-        questionInput.disabled = true;
-        document.getElementById('askBtn').disabled = true;
-        
-    appendMsg('user', question);
 
-  // Loading占位符
+    // 特殊命令：/reset 清空对话历史
+    if (question === '/reset') {
+        conversationHistory = [];
+        questionInput.value = '';
+        appendMsg('bot', '🔄 对话历史已清空，全新开始。');
+        syncChatToStorage();
+        return;
+    }
+
+        questionInput.disabled = true;
+            document.getElementById('askBtn').disabled = true;
+        
+        appendMsg('user', question);
+
+        // 多轮对话：本轮用户消息记入历史
+        conversationHistory.push({ role: 'user', content: question });
+
+        // Loading占位符
     const loadingId = 'msg-' + Date.now();
 
     const chatArea = document.getElementById('chatArea');
@@ -338,63 +372,84 @@ async function ask() {
     chatArea.scrollTop = chatArea.scrollHeight;
 
   try {
-          const questionInput = document.getElementById('questionInput');
-    const resp = await fetch(API + '/qa', {
+    // 创建空 bot 气泡（流式逐字填充）
+    const botMsgId = 'msg-' + Date.now();
+    let botContent = '';
+    let snippetsData = null;
+
+    const botDiv = document.createElement('div');
+    botDiv.className = 'msg bot';
+    botDiv.id = botMsgId;
+    botDiv.innerHTML = `
+      <div class="msg-avatar">🤖</div>
+      <div class="msg-bubble"><span id="${botMsgId}-text"></span></div>`;
+    chatArea.appendChild(botDiv);
+    const textSpan = document.getElementById(botMsgId + '-text');
+
+    // SSE 流式请求
+    const resp = await fetch(API + '/qa/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: question })
+      body: JSON.stringify({ query: question, history: conversationHistory.slice(-20) })
     });
-    
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
 
-    // 移除loading，替换真实回复
-    document.getElementById(loadingId)?.remove();
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-      appendMsg('bot', data.answer || '⚠️ 未获取到有效回答');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    // 如果存在引用来源则展示
-    if (data.references?.length > 0) {
-        const sourcesDiv = document.createElement('div');
-        sourcesDiv.className = 'sources';
-        
-            const docId = data.reference_doc_id || null;
-        for (const ref of data.references) {
-            const sourceItem = document.createElement('span');
-      sourceItem.className = 'source-item';
-            sourceItem.textContent = ref.content.length > 30 ? ref.content.substring(0, 30) + '...' : ref.content;
-            sourceItem.onclick = () => {
-              alert('来源：' + ref.filename + '\n\n---\n' + ref.content);
-          };
-        sourcesDiv.appendChild(sourceItem);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';  // 保留最后一个不完整行
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6);
+
+        if (payload === '[DONE]') break;
+
+        try {
+          const msg = JSON.parse(payload);
+          if (msg.type === 'token') {
+            botContent += msg.content;
+            textSpan.textContent = botContent;
+          } else if (msg.type === 'snippets') {
+            snippetsData = msg.data;
+          }
+        } catch (e) { /* skip malformed chunk */ }
       }
-
-      // 如果存在参考文档ID，添加查看文档按钮
-      if (docId) {
-            const viewLink = document.createElement('span');
-            viewLink.className = 'source-item';
-            viewLink.textContent = '🔗 查看原文档';
-            viewLink.style.cursor = 'pointer';
-            viewLink.onclick = () => switchTab('docs');
-        sourcesDiv.appendChild(viewLink);
-      }
-
-      // 在消息气泡下方追加引用区域
-      const lastBotMsg = chatArea.querySelectorAll('.msg.bot');
-      const lastMsg = lastBotMsg[lastBotMsg.length - 1];
-      if (lastMsg) lastMsg.appendChild(sourcesDiv);
+      chatArea.scrollTop = chatArea.scrollHeight;
     }
 
-    // ⭐关键：问答完成，同步当前聊天历史到storage
+    // 最终内容回写 bubble
+    const bubble = botDiv.querySelector('.msg-bubble');
+    bubble.textContent = botContent || '⚠️ 未获取到有效回答';
+    conversationHistory.push({ role: 'assistant', content: botContent || '' });
+
+    // 如果存在引用来源则展示
+    if (snippetsData?.length > 0) {
+      const sourcesDiv = document.createElement('div');
+      sourcesDiv.className = 'sources';
+      for (const ref of snippetsData) {
+        const sourceItem = document.createElement('span');
+        sourceItem.className = 'source-item';
+        const t = ref.text?.length > 30 ? ref.text.substring(0, 30) + '...' : (ref.text || '');
+        sourceItem.textContent = t;
+        sourceItem.onclick = () => alert('来源：' + ref.source + '\n\n---\n' + ref.text);
+        sourcesDiv.appendChild(sourceItem);
+      }
+      botDiv.appendChild(sourcesDiv);
+    }
+
     syncChatToStorage();
 
   } catch (err) {
-        
-      // 移除loading，替换错误消息
-        document.getElementById(loadingId)?.remove();
-        appendMsg('bot', '⚠️ 回答失败: ' + err.message);
-      
-    // 出错后也同步，确保异常状态被记住
+    conversationHistory.pop();
+    appendMsg('bot', '⚠️ 回答失败: ' + err.message);
     syncChatToStorage();
   } finally {
         const questionInput = document.getElementById('questionInput');

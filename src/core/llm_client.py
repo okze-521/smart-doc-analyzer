@@ -1,5 +1,7 @@
 """LLM 异步客户端 — 支持本地 Ollama / DeepSeek API"""
 
+import json
+
 import httpx
 
 
@@ -29,14 +31,27 @@ class LLMClient:
             return await self._deepseek_generate(prompt)
 
     async def generate_with_context(
-        self, query: str, context_chunks: list[str]
+        self, query: str, context_chunks: list[str], history: list[dict[str, str]] | None = None
     ) -> str:
-        """带上下文的 RAG 生成"""
+        """带上下文的 RAG 生成，支持多轮对话历史"""
         system_prompt = self.build_rag_prompt(query, context_chunks)
         if self.provider == "ollama":
-            return await self._ollama_chat(system_prompt, query)
+            return await self._ollama_chat(system_prompt, query, history)
         else:
-            return await self._deepseek_chat(system_prompt, query)
+            return await self._deepseek_chat(system_prompt, query, history)
+
+    async def generate_with_context_stream(
+        self, query: str, context_chunks: list[str], history: list[dict[str, str]] | None = None
+    ):
+        """流式 RAG 生成，逐步 yield token"""
+        system_prompt = self.build_rag_prompt(query, context_chunks)
+        messages = self._build_messages(system_prompt, query, history)
+        if self.provider == "ollama":
+            async for token in self._ollama_chat_stream(messages):
+                yield token
+        else:
+            async for token in self._deepseek_chat_stream(messages):
+                yield token
 
     # ── Ollama 后端 ─────────────────────
 
@@ -49,21 +64,35 @@ class LLMClient:
             resp.raise_for_status()
             return resp.json()["response"]
 
-    async def _ollama_chat(self, system: str, user: str) -> str:
+    async def _ollama_chat(self, system: str, user: str, history: list[dict[str, str]] | None = None) -> str:
+        messages = self._build_messages(system, user, history)
         async with httpx.AsyncClient(timeout=httpx.Timeout(300)) as client:
             resp = await client.post(
                 f"{self.ollama_host}/api/chat",
-                json={
-                    "model": self.ollama_model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "stream": False,
-                },
+                json={"model": self.ollama_model, "messages": messages, "stream": False},
             )
             resp.raise_for_status()
             return resp.json()["message"]["content"]
+
+    async def _ollama_chat_stream(self, messages: list[dict[str, str]]):
+        """Ollama 流式聊天，yield token"""
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300)) as client:
+            async with client.stream(
+                "POST",
+                f"{self.ollama_host}/api/chat",
+                json={"model": self.ollama_model, "messages": messages, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        content = chunk.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
 
     # ── DeepSeek 后端 ───────────────────
 
@@ -83,23 +112,53 @@ class LLMClient:
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
 
-    async def _deepseek_chat(self, system: str, user: str) -> str:
+    async def _deepseek_chat(self, system: str, user: str, history: list[dict[str, str]] | None = None) -> str:
+        messages = self._build_messages(system, user, history)
         async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as client:
             resp = await client.post(
                 f"{self.DEEPSEEK_BASE}/chat/completions",
                 headers={"Authorization": f"Bearer {self.deepseek_api_key}"},
-                json={
-                    "model": self.DEEPSEEK_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                },
+                json={"model": self.DEEPSEEK_MODEL, "messages": messages},
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
 
+    async def _deepseek_chat_stream(self, messages: list[dict[str, str]]):
+        """DeepSeek 流式聊天，yield token（SSE 格式）"""
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as client:
+            async with client.stream(
+                "POST",
+                f"{self.DEEPSEEK_BASE}/chat/completions",
+                headers={"Authorization": f"Bearer {self.deepseek_api_key}"},
+                json={"model": self.DEEPSEEK_MODEL, "messages": messages, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]  # 去掉 "data: " 前缀
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        content = chunk["choices"][0].get("delta", {}).get("content", "")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+
     # ── 工具方法 ────────────────────────
+
+    @staticmethod
+    def _build_messages(system: str, user: str, history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+        """构建 messages 列表：system + 历史 + 当前用户消息"""
+        messages = [{"role": "system", "content": system}]
+        if history:
+            for msg in history[-20:]:
+                if msg.get("role") in ("user", "assistant"):
+                    messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": user})
+        return messages
 
     @staticmethod
     def build_rag_prompt(query: str, context_chunks: list[str]) -> str:

@@ -20,6 +20,7 @@ class DocumentUploadResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=50)
+    history: list[dict[str, str]] | None = None  # [{role, content}] 多轮对话历史，最多 10 轮
 
 
 class SearchChunk(BaseModel):

@@ -1,11 +1,13 @@
 """RAG 检索 API — 文档入库 + 查询"""
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.database import get_db
@@ -104,7 +106,7 @@ async def ask_question(
     # 2. 拼接上下文 + LLM 生成
     context = [c["text"] for c in chunks]
     client = LLMClient()
-    answer = await client.generate_with_context(req.query, context)
+    answer = await client.generate_with_context(req.query, context, req.history)
 
     return {
         "query": req.query,
@@ -114,6 +116,41 @@ async def ask_question(
             for c in chunks
         ],
     }
+
+
+@router.post("/documents/qa/stream")
+async def ask_question_stream(
+    req: SearchRequest,
+    search: Annotated[SearchService, Depends(get_search_service)],
+):
+    """检索 + 流式 LLM 生成（SSE）"""
+    result = search.search(req.query, top_k=req.top_k)
+    chunks = result["chunks"]
+
+    if not chunks:
+        async def empty_stream():
+            yield "data: 没有找到相关文档，请先上传文档。\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    context = [c["text"] for c in chunks]
+    client = LLMClient()
+
+    async def event_stream():
+        # 先发送引用来源（前端可选展示）
+        snippets_json = json.dumps([
+            {"text": c["text"][:200], "source": c["source_file"], "score": c["score"]}
+            for c in chunks
+        ])
+        yield f"data: {json.dumps({'type': 'snippets', 'data': json.loads(snippets_json)})}\n\n"
+
+        # 流式发送回答
+        async for token in client.generate_with_context_stream(req.query, context, req.history):
+            yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+        # 结束标记
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/documents", response_model=DocumentListResponse)
