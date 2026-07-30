@@ -45,7 +45,7 @@ class QdrantStore:
     #  写入
     # ----------------------------------------------------------------
 
-    def upsert(self, point_id: str, vector: list[float], payload: dict) -> str:
+    def upsert(self, point_id: int, vector: list[float], payload: dict) -> int:
         """插入/更新单条向量"""
         self._client.upsert(
             collection_name=self.collection_name,

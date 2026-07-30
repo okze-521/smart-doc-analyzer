@@ -3,7 +3,6 @@
 import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
-from sqlalchemy.orm import relationship
 
 from src.database import Base
 
@@ -17,9 +16,9 @@ class User(Base):
     hashed_password = Column(String(200), nullable=False)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
-    documents = relationship("Document", back_populates="owner")
+    # documents = relationship("Document", back_populates="owner")  # Pro 版启用
 
     def __repr__(self):
         return f"<User {self.username}>"

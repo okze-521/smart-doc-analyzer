@@ -58,13 +58,17 @@ async def upload_document(
     try:
         # 1. 写入数据库
         repo = DocumentRepository(db)
-        doc = repo.create(str(tmp_path), file.filename, ext[1:])
+        doc = repo.create(str(tmp_path), file.filename, ext[1:], file_size=tmp_path.stat().st_size)
 
         # 2. 入库到 Qdrant（传入 doc_id 关联）
         result = ingest.ingest(tmp_path, doc_id=doc.id)
 
-        # 3. 更新状态 + 片段数
-        repo.update_metadata(doc.id, {}, chunk_count=result["chunk_count"])
+        # 3. 更新状态 + 片段数 + 全文内容
+        repo.update_metadata(
+            doc.id, result.get("metadata", {}),
+            chunk_count=result["chunk_count"],
+            content=result["full_text"],
+        )
         repo.update_status(doc.id, "completed")
 
         return {
@@ -163,7 +167,7 @@ def list_documents(
     repo = DocumentRepository(db)
     items = repo.list_all(offset=offset, limit=limit)
     return DocumentListResponse(
-        total=len(items),
+        total=repo.count_all(),
         items=[DocumentResponse.model_validate(d) for d in items],
     )
 

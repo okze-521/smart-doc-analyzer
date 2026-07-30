@@ -51,6 +51,9 @@ class DocumentRepository:
             .all()
         )
 
+    def count_all(self) -> int:
+        return self.session.query(Document).count()
+
     # ---- 更新 ----
 
     def update_status(self, doc_id: int, status: str) -> Document | None:

@@ -72,17 +72,20 @@ class LLMClient:
         """检查是否有备用的 DeepSeek API"""
         return self.provider == "ollama" and bool(self.deepseek_api_key)
 
-    def _primary_chat(self, system: str, user: str, history: list[dict[str, str]] | None) -> str:
+    async def _primary_chat(self, system: str, user: str, history: list[dict[str, str]] | None) -> str:
         """路由到当前主 provider 的聊天"""
         if self.provider == "ollama":
-            return self._ollama_chat(system, user, history)
-        return self._deepseek_chat(system, user, history)
+            return await self._ollama_chat(system, user, history)
+        return await self._deepseek_chat(system, user, history)
 
-    def _primary_chat_stream(self, messages: list[dict[str, str]]):
+    async def _primary_chat_stream(self, messages: list[dict[str, str]]):
         """路由到当前主 provider 的流式聊天"""
         if self.provider == "ollama":
-            return self._ollama_chat_stream(messages)
-        return self._deepseek_chat_stream(messages)
+            async for token in self._ollama_chat_stream(messages):
+                yield token
+        else:
+            async for token in self._deepseek_chat_stream(messages):
+                yield token
 
     # ── Ollama 后端 ─────────────────────
 

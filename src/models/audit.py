@@ -17,7 +17,7 @@ class AuditLog(Base):
     resource_id = Column(Integer, nullable=True)
     detail = Column(String(500), nullable=True)
     ip_address = Column(String(50), nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
     def __repr__(self):
         return f"<AuditLog {self.action} by user#{self.user_id}>"

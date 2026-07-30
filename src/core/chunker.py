@@ -84,7 +84,7 @@ class TextChunker:
                 chunks.append(current)
                 current = sentence
             elif current:
-                current += sentence
+                current += " " + sentence
             else:
                 # 第一句可能本身就超长（比如长串英文无标点）
                 if len(sentence) > self.chunk_size * 2:

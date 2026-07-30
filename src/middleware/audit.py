@@ -23,8 +23,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if path in self.SKIP_PATHS:
             return response
 
+        db: Session = SessionLocal()
         try:
-            db: Session = SessionLocal()
             log = AuditLog(
                 action=request.method.lower(),
                 resource_type=path.split("/")[2] if len(path.split("/")) > 2 else "root",
@@ -33,8 +33,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
             )
             db.add(log)
             db.commit()
-            db.close()
         except Exception:
             pass
+        finally:
+            db.close()
 
         return response

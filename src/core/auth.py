@@ -1,6 +1,6 @@
 """JWT 认证工具"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
 import bcrypt
 
@@ -24,7 +24,7 @@ def create_access_token(
 ) -> str:
     """生成 JWT token"""
     to_encode = data.copy()
-    expire = datetime.utcnow() + expires_delta
+    expire = datetime.now(tz=timezone.utc) + expires_delta
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, secret, algorithm="HS256")
 

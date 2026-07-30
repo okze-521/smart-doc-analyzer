@@ -83,22 +83,17 @@ def get_classifier():
 @router.post("/classify", response_model=ClassifyResponse)
 async def classify_document(
     req: ClassifyRequest,
+    db: Session = Depends(get_db),
     classifier: DocumentClassifier = Depends(get_classifier),
 ):
     """对文本或文档 ID 进行自动分类"""
     text = req.text
     if req.doc_id is not None:
-        from src.database import SessionLocal
-        from src.repositories.document import DocumentRepository
-        db = SessionLocal()
-        try:
-            repo = DocumentRepository(db)
-            doc = repo.get_by_id(req.doc_id)
-            if not doc:
-                raise HTTPException(404, "文档未找到")
-            text = doc.content or ""
-        finally:
-            db.close()
+        repo = DocumentRepository(db)
+        doc = repo.get_by_id(req.doc_id)
+        if not doc:
+            raise HTTPException(404, "文档未找到")
+        text = doc.content or ""
 
     if not text:
         raise HTTPException(400, "无文本内容可分类")

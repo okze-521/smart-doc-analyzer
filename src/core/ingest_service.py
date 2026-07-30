@@ -48,9 +48,8 @@ class IngestService:
                 "chunk_index": i,
                 "source_file": str(file_path),
                 "file_type": doc.file_type,
+                "doc_id": doc_id,
             }
-            if doc_id is not None:
-                payload["doc_id"] = doc_id
             self.qdrant.upsert(
                 point_id=point_id,
                 vector=vector,
@@ -64,6 +63,8 @@ class IngestService:
             "total_pages": doc.total_pages,
             "chunk_count": len(chunks),
             "chunks": chunk_records,
+            "full_text": doc.full_text,
+            "metadata": doc.metadata,
         }
 
     def _make_point_id(self, file_path: Path, chunk_index: int) -> int:
